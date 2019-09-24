@@ -1,6 +1,8 @@
 ﻿using OfficeOpenXml;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace HtmlGenerator
@@ -9,25 +11,38 @@ namespace HtmlGenerator
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("Hello World!");
-            Console.WriteLine("Loading Excel file.");
+            string templatePath = "";
+            string excelFile = "";
+            string resultFile = "";
 
-            FileInfo fi = new FileInfo(@"C:\\Users\\chuns\\OneDrive\\Documents\\GitHub\\HtmlGenerator\\Template01.xlsx");
+            if (args.Length > 0)
+            {
+                string configFile = args[0];
+
+                string[] parameters = File.ReadAllText(configFile).Split(Environment.NewLine);
+                templatePath = parameters[0].Trim();
+                excelFile = parameters[1].Trim();
+                resultFile = parameters[2].Trim();
+            }
+
+
+            string htmlResult = "";
+            List<Marker> markers = new List<Marker>();
+            List<Template> templates = GetTemplates(templatePath);
+            FileInfo fi = new FileInfo(excelFile);
+
             using (ExcelPackage ep = new ExcelPackage(fi))
             {
-                foreach(ExcelWorksheet currentWorksheet in ep.Workbook.Worksheets)
+                foreach (ExcelWorksheet currentWorksheet in ep.Workbook.Worksheets)
                 {
-                    Console.WriteLine(currentWorksheet.Name);
-
-                    //Get the name range
                     foreach (ExcelNamedRange currentNameRange in currentWorksheet.Workbook.Names)
                     {
                         CellAddress currentNameRangeAddress = ResolveAddress(currentNameRange.FullAddressAbsolute);
 
                         object[,] cellInfo = (object[,])currentNameRange.Value;
-
                         string currentRow = "";
-                        for(int row = 0; row < currentNameRange.Rows; row++)
+
+                        for (int row = 0; row < currentNameRange.Rows; row++)
                         {
                             currentRow += "<tr>" + Environment.NewLine;
 
@@ -71,10 +86,15 @@ namespace HtmlGenerator
 
                                 } while (nextCol);
 
+                                Marker markerType = null;
+                                if (IsMarker(templates, colValue, out markerType))
+                                {
+                                    markers.Add(markerType);
+                                }
+
                                 currentRowColumns += string.Format("<td colspan=\"{0}\" style=\"{1}\">{2}</td>", iColSpan, ResolveStyle(currentCell), colValue);
                                 colValue = "";
-                                iColSpan = 1;
-                            }
+                                iColSpan = 1;                            }
                             #endregion
 
                             currentRow += currentRowColumns + Environment.NewLine;
@@ -82,14 +102,109 @@ namespace HtmlGenerator
                         }
 
                         string currentTable = "";
-                        currentTable += "<table>" + Environment.NewLine;
+                        currentTable += "<table id=\"formTable\">" + Environment.NewLine;
                         currentTable += currentRow + Environment.NewLine;
                         currentTable += "</table>" + Environment.NewLine;
 
-                        Console.WriteLine(currentTable);
+                        string submitButton = "<p><input type=\"button\" onClick=\"GetContents();\" value=\"ClickMe\" /></p>";
+
+                        htmlResult = GetScript(templatePath) + Environment.NewLine + 
+                                     currentTable + Environment.NewLine + 
+                                     submitButton + Environment.NewLine;
                     }
                 }
             }
+
+            foreach (Marker marker in markers)
+            {
+                Template currentTemplate = templates.Where(m => m.MarkerType == marker.Type).FirstOrDefault();
+                if (currentTemplate != null)
+                {
+                    htmlResult = htmlResult.Replace(marker.Value, currentTemplate.Content.Replace("_NAME_", marker.Id));
+                }
+            }
+
+            GenerateHtml(resultFile, htmlResult);
+        }
+
+
+        static bool IsMarker(List<Template> templates, string value, out Marker markerType)
+        {
+            bool returnValue = false;
+            markerType = null;
+
+            foreach (Template currentTemplate in templates)
+            {
+                if (value.StartsWith(currentTemplate.MarkerType, StringComparison.InvariantCultureIgnoreCase))
+                {
+                    markerType = new Marker()
+                    {
+                        Value = value,
+                        Type = currentTemplate.MarkerType,
+                        Id = value.Substring(value.IndexOf("#") + 1).Trim()
+                    };
+                    returnValue = true;
+                    break;
+                }
+            }
+            return returnValue;
+        }
+
+        static List<Template> GetTemplates(string templateFolder)
+        {
+            List<Template> returnValue = new List<Template>();
+            string[] templateFiles = Directory.GetFiles(templateFolder, "*.txt");
+
+            for (int i = 0; i < templateFiles.Length; i++)
+            {
+                string fullPath = templateFiles[i];
+                string filename = fullPath;
+                filename = filename.Replace(templateFolder, "");
+
+                if (filename.StartsWith("_") && filename.EndsWith("_.txt"))
+                {
+                    returnValue.Add(new Template()
+                    {
+                        MarkerType = filename.Replace(".txt", ""),
+                        Content = File.ReadAllText(fullPath)
+                    });
+                }
+            }
+
+            return returnValue;
+        }
+
+        static string GetScript(string templateFolder)
+        {
+            string returnValue = "";
+            string[] templateFiles = Directory.GetFiles(templateFolder, "scripts.js");
+
+            if (templateFiles.Length > 0)
+            {
+                returnValue = File.ReadAllText(templateFiles[0]);
+            }
+
+            return returnValue;
+        }
+
+        static string GenerateHtml(string fileToSave, string htmlBody)
+        {
+            string returnValue = "";
+
+            const string htmlTemplate = @"<html><head></head><body>_BODY_</body></html>";
+            string finalContent = htmlTemplate.Replace("_BODY_", htmlBody);
+
+            try
+            {
+                File.WriteAllText(fileToSave, finalContent);
+                returnValue = fileToSave;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+            }
+
+            return returnValue;
         }
 
         static string ResolveStyle(ExcelRange currentCell)
@@ -176,6 +291,18 @@ namespace HtmlGenerator
         public bool Bold { get; set; }
         public bool Italic { get; set; }
         public bool Underline { get; set; }
+    }
 
+    public class Template
+    {
+        public string MarkerType { get; set; }
+        public string Content { get; set; }
+    }
+
+    public class Marker
+    {
+        public string Id { get; set; }
+        public string Type { get; set; }
+        public string Value { get; set; }
     }
 }

@@ -1,0 +1,7 @@
+﻿
+<input type="radio" name="_NAME_" id="_NAME_" value="yes">YES
+<br>
+<input type="radio" name="_NAME_" id="_NAME_" value="no">NO
+<br>
+<input type="radio" name="_NAME_" id="_NAME_" value="na">N/A
+<br>
