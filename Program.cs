@@ -18,113 +18,113 @@ namespace HtmlGenerator
             if (args.Length > 0)
             {
                 string configFile = args[0];
-
                 string[] parameters = File.ReadAllText(configFile).Split(Environment.NewLine);
+
                 templatePath = parameters[0].Trim();
                 excelFile = parameters[1].Trim();
                 resultFile = parameters[2].Trim();
             }
 
-
-            string htmlResult = "";
-            List<Marker> markers = new List<Marker>();
             List<Template> templates = GetTemplates(templatePath);
             FileInfo fi = new FileInfo(excelFile);
 
             using (ExcelPackage ep = new ExcelPackage(fi))
             {
-                foreach (ExcelWorksheet currentWorksheet in ep.Workbook.Worksheets)
+                foreach (ExcelNamedRange currentNameRange in ep.Workbook.Names)
                 {
-                    foreach (ExcelNamedRange currentNameRange in currentWorksheet.Workbook.Names)
+                    List<Marker> markers = new List<Marker>();
+
+                    string htmlResult = "";
+                    CellAddress currentNameRangeAddress = ResolveAddress(currentNameRange.FullAddressAbsolute);
+                    ExcelWorksheet currentWorksheet = currentNameRange.Worksheet;
+
+                    object[,] cellInfo = (object[,])currentNameRange.Value;
+                    string currentRow = "";
+
+                    for (int row = 0; row < currentNameRange.Rows; row++)
                     {
-                        CellAddress currentNameRangeAddress = ResolveAddress(currentNameRange.FullAddressAbsolute);
+                        currentRow += "<tr>" + Environment.NewLine;
 
-                        object[,] cellInfo = (object[,])currentNameRange.Value;
-                        string currentRow = "";
+                        #region Format the columns
+                        string currentRowColumns = "";
+                        string colValue = "";
+                        bool nextCol = true;
+                        int iColSpan = 1;
 
-                        for (int row = 0; row < currentNameRange.Rows; row++)
+                        for (int col = 0; col < currentNameRange.Columns; col++)
                         {
-                            currentRow += "<tr>" + Environment.NewLine;
-
-                            #region Format the columns
-                            string currentRowColumns = "";
-                            string colValue = "";
-                            bool nextCol = true;
-                            int iColSpan = 1;
-
-                            for (int col = 0; col < currentNameRange.Columns; col++)
+                            CellAddress currentCellAddress = new CellAddress()
                             {
-                                CellAddress currentCellAddress = new CellAddress()
-                                {
-                                    FromRow = currentNameRangeAddress.FromRow + row,
-                                    FromCol = currentNameRangeAddress.FromCol + col,
-                                    ToRow = currentNameRangeAddress.FromRow + row,
-                                    ToCol = currentNameRangeAddress.FromCol + col
-                                };
+                                FromRow = currentNameRangeAddress.FromRow + row,
+                                FromCol = currentNameRangeAddress.FromCol + col,
+                                ToRow = currentNameRangeAddress.FromRow + row,
+                                ToCol = currentNameRangeAddress.FromCol + col
+                            };
 
-                                ExcelRange currentCell = currentWorksheet.Cells[currentCellAddress.FromRow, currentCellAddress.FromCol];
+                            ExcelRange currentCell = currentWorksheet.Cells[currentCellAddress.FromRow, currentCellAddress.FromCol];
 
-                                do
+                            do
+                            {
+                                colValue += cellInfo[row, col] + "";
+                                if (col < currentNameRange.Columns - 1)
                                 {
-                                    colValue += cellInfo[row, col] + "";
-                                    if (col < currentNameRange.Columns - 1)
+                                    if (cellInfo[row, col + 1] == null)
                                     {
-                                        if (cellInfo[row, col + 1] == null)
-                                        {
-                                            iColSpan++;
-                                            col++;
-                                        }
-                                        else
-                                        {
-                                            nextCol = false;
-                                        }
+                                        iColSpan++;
+                                        col++;
                                     }
                                     else
                                     {
                                         nextCol = false;
                                     }
-
-                                } while (nextCol);
-
-                                Marker markerType = null;
-                                if (IsMarker(templates, colValue, out markerType))
+                                }
+                                else
                                 {
-                                    markers.Add(markerType);
+                                    nextCol = false;
                                 }
 
-                                currentRowColumns += string.Format("<td colspan=\"{0}\" style=\"{1}\">{2}</td>", iColSpan, ResolveStyle(currentCell), colValue);
-                                colValue = "";
-                                iColSpan = 1;                            }
-                            #endregion
+                            } while (nextCol);
 
-                            currentRow += currentRowColumns + Environment.NewLine;
-                            currentRow += "</tr>" + Environment.NewLine;
-                        }
+                            Marker markerType = null;
+                            if (IsMarker(templates, colValue, out markerType))
+                            {
+                                markers.Add(markerType);
+                            }
 
-                        string currentTable = "";
-                        currentTable += "<table id=\"formTable\">" + Environment.NewLine;
-                        currentTable += currentRow + Environment.NewLine;
-                        currentTable += "</table>" + Environment.NewLine;
+                            currentRowColumns += string.Format("<td colspan=\"{0}\" style=\"{1}\">{2}</td>", iColSpan, ResolveStyle(currentCell), colValue);
+                            colValue = "";
+                            iColSpan = 1;                            }
+                        #endregion
 
-                        string submitButton = "<p><input type=\"button\" onClick=\"GetContents();\" value=\"ClickMe\" /></p>";
-
-                        htmlResult = GetScript(templatePath) + Environment.NewLine + 
-                                     currentTable + Environment.NewLine + 
-                                     submitButton + Environment.NewLine;
+                        currentRow += currentRowColumns + Environment.NewLine;
+                        currentRow += "</tr>" + Environment.NewLine;
                     }
+
+                    string currentTable = "";
+                    currentTable += "<table id=\"formTable\">" + Environment.NewLine;
+                    currentTable += currentRow + Environment.NewLine;
+                    currentTable += "</table>" + Environment.NewLine;
+
+                    string submitButton = GetHtmlControl(templatePath);
+                    htmlResult = currentTable + Environment.NewLine + 
+                                 submitButton + Environment.NewLine;
+
+                    foreach (Marker marker in markers)
+                    {
+                        Template currentTemplate = templates.Where(m => m.MarkerType == marker.Type).FirstOrDefault();
+                        if (currentTemplate != null)
+                        {
+                            htmlResult = htmlResult.Replace(marker.Value, currentTemplate.Content.Replace("_NAME_", marker.Id));
+                        }
+                    }
+                    
+                    string outputFilename = resultFile.Replace(".html", currentWorksheet.Name.Replace(".", "_") + ".html");
+                    string javascript = GetScript(templatePath);
+                    string htmlTemplate = GetHtmlBody(templatePath);
+
+                    GenerateHtml(outputFilename, htmlTemplate, javascript, htmlResult);
                 }
             }
-
-            foreach (Marker marker in markers)
-            {
-                Template currentTemplate = templates.Where(m => m.MarkerType == marker.Type).FirstOrDefault();
-                if (currentTemplate != null)
-                {
-                    htmlResult = htmlResult.Replace(marker.Value, currentTemplate.Content.Replace("_NAME_", marker.Id));
-                }
-            }
-
-            GenerateHtml(resultFile, htmlResult);
         }
 
 
@@ -187,12 +187,39 @@ namespace HtmlGenerator
             return returnValue;
         }
 
-        static string GenerateHtml(string fileToSave, string htmlBody)
+        static string GetHtmlBody(string templateFolder)
         {
             string returnValue = "";
+            string[] templateFiles = Directory.GetFiles(templateFolder, "templateBody.html");
 
-            const string htmlTemplate = @"<html><head></head><body>_BODY_</body></html>";
-            string finalContent = htmlTemplate.Replace("_BODY_", htmlBody);
+            if (templateFiles.Length > 0)
+            {
+                returnValue = File.ReadAllText(templateFiles[0]);
+            }
+
+            return returnValue;
+        }
+
+        static string GetHtmlControl(string templateFolder)
+        {
+            string returnValue = "";
+            string[] templateFiles = Directory.GetFiles(templateFolder, "templateControl.html");
+
+            if (templateFiles.Length > 0)
+            {
+                returnValue = File.ReadAllText(templateFiles[0]);
+            }
+
+            return returnValue;
+        }
+
+        static string GenerateHtml(string fileToSave, string htmlTemplate, string javascript, string htmlBody)
+        {
+            string returnValue = "";
+            string finalContent = htmlTemplate;
+
+            finalContent = finalContent.Replace("_SCRIPT_", javascript);
+            finalContent = finalContent.Replace("_BODY_", htmlBody);
 
             try
             {

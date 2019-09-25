@@ -1,4 +1,5 @@
 ﻿<select name="_NAME_" id="_NAME_">
+  <option value=""></option>
   <option value="y">Y</option>
   <option value="n">N</option>
   <option value="na">N/A</option>
